@@ -1,0 +1,324 @@
+{
+	"info": {
+		"_postman_id": "whatsapp-bridge-api-collection",
+		"name": "WhatsApp Bridge API - Test Collection",
+		"description": "Collection to test all endpoints of the WhatsApp Bridge API connecting GHL and Ultramsg",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						""
+					]
+				},
+				"description": "Check if the server is running and get available endpoints"
+			},
+			"response": []
+		},
+		{
+			"name": "Send Message (GHL → WhatsApp)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"Hello! This is a test message from GHL to WhatsApp via Ultramsg.\",\n  \"phone\": \"{{test_phone_number}}\",\n  \"subAccountId\": \"{{sub_account_id}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/send",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"send"
+					]
+				},
+				"description": "Send a message from GHL to WhatsApp via Ultramsg. This endpoint receives requests from GHL webhooks and forwards them to Ultramsg API."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200 or 201\", function () {",
+							"    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+							"});",
+							"",
+							"pm.test(\"Response has success field\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData).to.have.property('success');",
+							"});",
+							"",
+							"pm.test(\"Response time is less than 5000ms\", function () {",
+							"    pm.expect(pm.response.responseTime).to.be.below(5000);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "Incoming Message (WhatsApp → GHL)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"data\": {\n    \"from\": \"{{test_phone_number}}\",\n    \"body\": \"This is a test incoming message from WhatsApp\",\n    \"id\": \"msg_123456\",\n    \"timestamp\": \"1234567890\"\n  },\n  \"instanceId\": \"{{ultramsg_instance_id}}\",\n  \"subAccountId\": \"{{sub_account_id}}\",\n  \"contactId\": \"{{ghl_contact_id}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/incoming",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"incoming"
+					]
+				},
+				"description": "Simulate an incoming message webhook from Ultramsg. This endpoint receives webhooks from Ultramsg and forwards messages to GHL."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.expect(pm.response.code).to.be.equal(200);",
+							"});",
+							"",
+							"pm.test(\"Response has success field\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData).to.have.property('success');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "Incoming Message - Alternative Format",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"Alternative format test message\",\n  \"from\": \"{{test_phone_number}}\",\n  \"phone\": \"{{test_phone_number}}\",\n  \"text\": \"Alternative format test message\",\n  \"instanceId\": \"{{ultramsg_instance_id}}\",\n  \"subAccountId\": \"{{sub_account_id}}\",\n  \"contactId\": \"{{ghl_contact_id}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/incoming",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"incoming"
+					]
+				},
+				"description": "Test alternative webhook format that might be used by Ultramsg"
+			},
+			"response": []
+		},
+		{
+			"name": "Status Update (WhatsApp → GHL)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"data\": {\n    \"id\": \"msg_123456\",\n    \"status\": \"delivered\"\n  },\n  \"messageId\": \"msg_123456\",\n  \"status\": \"delivered\",\n  \"subAccountId\": \"{{sub_account_id}}\",\n  \"instanceId\": \"{{ultramsg_instance_id}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/status",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"status"
+					]
+				},
+				"description": "Simulate a status update webhook from Ultramsg. This endpoint receives status updates (delivered, read, sent) and updates GHL."
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.expect(pm.response.code).to.be.equal(200);",
+							"});",
+							"",
+							"pm.test(\"Response has success field\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData).to.have.property('success');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		},
+		{
+			"name": "Status Update - Read Status",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"data\": {\n    \"id\": \"msg_123456\",\n    \"status\": \"read\"\n  },\n  \"messageId\": \"msg_123456\",\n  \"status\": \"read\",\n  \"subAccountId\": \"{{sub_account_id}}\",\n  \"instanceId\": \"{{ultramsg_instance_id}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/status",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"status"
+					]
+				},
+				"description": "Test read status update"
+			},
+			"response": []
+		},
+		{
+			"name": "Send Message - Missing Fields (Error Test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"This should fail because phone is missing\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/send",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"send"
+					]
+				},
+				"description": "Test error handling when required fields are missing"
+			},
+			"response": [],
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 400\", function () {",
+							"    pm.expect(pm.response.code).to.be.equal(400);",
+							"});",
+							"",
+							"pm.test(\"Response has error field\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData).to.have.property('error');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "test_phone_number",
+			"value": "+1234567890",
+			"type": "string"
+		},
+		{
+			"key": "sub_account_id",
+			"value": "sub_account_123",
+			"type": "string"
+		},
+		{
+			"key": "ultramsg_instance_id",
+			"value": "your_instance_id",
+			"type": "string"
+		},
+		{
+			"key": "ghl_contact_id",
+			"value": "contact_id_here",
+			"type": "string"
+		}
+	]
+}
+
