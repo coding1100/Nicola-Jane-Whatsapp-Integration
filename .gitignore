@@ -1,36 +1,20 @@
-# Dependencies
-node_modules/
-
-# Environment variables
+/.phpunit.cache
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
 .env
-.env.local
-.env.*.local
-
-# Logs
-logs
-*.log
-npm-debug.log*
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Temporary files
-*.tmp
-*.temp
-
-# SSL certificates
-ssl/
-*.pem
-*.key
-*.crt
-
-# Docker
-.dockerignore
-
+.env.backup
+.env.production
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+npm-debug.log
+yarn-error.log
+/.fleet
+/.idea
+/.vscode
+.github
