@@ -45,11 +45,25 @@ return [
     */
 
     'ultramsg' => [
-        // Default Ultramsg Instance ID (fallback only)
+        // Default Ultramsg Instance ID (used if sub-account specific credentials not found)
         'instance_id' => 'instance149866',
 
-        // Default Ultramsg API Token (fallback only)
+        // Default Ultramsg API Token (used if sub-account specific credentials not found)
         'api_token' => 'ro37j993kbiptecy',
+
+        // Per sub-account Ultramsg credentials (optional)
+        // Add your sub-accounts here if you have multiple:
+        'sub_accounts' => [
+            // Example:
+            // 'default' => [
+            //     'instance_id' => 'instance123',
+            //     'api_token' => 'token123',
+            // ],
+            // 'sub_account_001' => [
+            //     'instance_id' => 'instance456',
+            //     'api_token' => 'token456',
+            // ],
+        ],
     ],
 ];
 
