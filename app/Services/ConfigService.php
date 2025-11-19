@@ -19,9 +19,10 @@ class ConfigService
     public static function getUltramsgCredentials(?string $subAccountId = null): ?array
     {
         if (!$subAccountId) {
-            // Fallback to environment variables if no sub-account specified
-            $defaultInstanceId = env('ULTRAMSG_INSTANCE_ID');
-            $defaultApiToken = env('ULTRAMSG_API_TOKEN');
+            // Get from config file only
+            $config = config('whatsapp.ultramsg', []);
+            $defaultInstanceId = $config['instance_id'] ?? null;
+            $defaultApiToken = $config['api_token'] ?? null;
 
             if ($defaultInstanceId && $defaultApiToken) {
                 return [
@@ -60,22 +61,23 @@ class ConfigService
      */
     public static function getGHLAPIKey(?string $subAccountId = null): ?string
     {
+        // Get config
+        $config = config('whatsapp.ghl', []);
+
         if (!$subAccountId) {
-            // Fallback to environment variable if no sub-account specified
-            return env('GHL_API_KEY');
+            // Return default API key from config
+            return $config['api_key'] ?? null;
         }
 
         try {
-            // For now, GHL API keys can be stored per sub-account in a separate table
-            // or use environment variable with sub-account prefix
-            // This is a placeholder - you may want to create a ghl_credentials table
-            $apiKey = env("GHL_API_KEY_{$subAccountId}");
-            if ($apiKey) {
-                return $apiKey;
+            // Check for sub-account specific API key in config
+            $subAccountConfig = $config['sub_accounts'][$subAccountId] ?? null;
+            if ($subAccountConfig && !empty($subAccountConfig['api_key'])) {
+                return $subAccountConfig['api_key'];
             }
 
-            // Fallback to default
-            return env('GHL_API_KEY');
+            // Fallback to default API key from config
+            return $config['api_key'] ?? null;
         } catch (\Exception $e) {
             Log::error('Error fetching GHL API key', [
                 'error' => $e->getMessage(),
@@ -93,19 +95,23 @@ class ConfigService
      */
     public static function getGHLLocationId(?string $subAccountId = null): ?string
     {
+        // Get config
+        $config = config('whatsapp.ghl', []);
+
         if (!$subAccountId) {
-            return env('GHL_LOCATION_ID');
+            // Return default location ID from config
+            return $config['location_id'] ?? null;
         }
 
         try {
-            // Try sub-account specific location ID
-            $locationId = env("GHL_LOCATION_ID_{$subAccountId}");
-            if ($locationId) {
-                return $locationId;
+            // Check for sub-account specific location ID in config
+            $subAccountConfig = $config['sub_accounts'][$subAccountId] ?? null;
+            if ($subAccountConfig && !empty($subAccountConfig['location_id'])) {
+                return $subAccountConfig['location_id'];
             }
 
-            // Fallback to default
-            return env('GHL_LOCATION_ID');
+            // Fallback to default location ID from config
+            return $config['location_id'] ?? null;
         } catch (\Exception $e) {
             Log::error('Error fetching GHL location ID', [
                 'error' => $e->getMessage(),
