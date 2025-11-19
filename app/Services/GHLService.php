@@ -133,16 +133,19 @@ class GHLService
         }
 
         // Build payload in exact schema order
-        // 1. type
-        $payload['type'] = 'InboundMessage';
+        // 1. type - Try matching messageType since "InboundMessage" is being rejected
+        // The type field enum might need to match the channel type
+        $payload['type'] = $type; // e.g. "WhatsApp" to match messageType
         
         // 2. locationId
         if ($locationId) {
             $payload['locationId'] = $locationId;
         }
         
-        // 3. attachments
-        $payload['attachments'] = !empty($attachmentUrls) ? $attachmentUrls : [];
+        // 3. attachments - Only include if not empty (empty array causes validation error)
+        if (!empty($attachmentUrls)) {
+            $payload['attachments'] = $attachmentUrls;
+        }
         
         // 4. body
         if ($message) {
