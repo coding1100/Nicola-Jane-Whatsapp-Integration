@@ -165,14 +165,33 @@ class ConfigService
         // Only check config file - no database lookup
         $config = config('whatsapp.instance_mappings', []);
         
+        Log::info('getSubAccountIdByInstance called', [
+            'instanceId' => $instanceId,
+            'instanceId_type' => gettype($instanceId),
+            'config_keys' => array_keys($config),
+            'config_full' => $config,
+        ]);
+        
+        // Normalize instanceId to string (in case it comes as number)
+        $instanceId = (string) $instanceId;
+        
         // Direct lookup
         if (isset($config[$instanceId])) {
+            Log::info('Found subAccountId via direct lookup', [
+                'instanceId' => $instanceId,
+                'subAccountId' => $config[$instanceId],
+            ]);
             return $config[$instanceId];
         }
         
         // Try with "instance" prefix (in case config has "instance149866" but webhook sends "149866")
         $instanceIdWithPrefix = 'instance' . $instanceId;
         if (isset($config[$instanceIdWithPrefix])) {
+            Log::info('Found subAccountId via prefix lookup', [
+                'instanceId' => $instanceId,
+                'looked_up' => $instanceIdWithPrefix,
+                'subAccountId' => $config[$instanceIdWithPrefix],
+            ]);
             return $config[$instanceIdWithPrefix];
         }
         
@@ -180,6 +199,11 @@ class ConfigService
         if (str_starts_with($instanceId, 'instance')) {
             $instanceIdWithoutPrefix = str_replace('instance', '', $instanceId);
             if (isset($config[$instanceIdWithoutPrefix])) {
+                Log::info('Found subAccountId via prefix removal', [
+                    'instanceId' => $instanceId,
+                    'looked_up' => $instanceIdWithoutPrefix,
+                    'subAccountId' => $config[$instanceIdWithoutPrefix],
+                ]);
                 return $config[$instanceIdWithoutPrefix];
             }
         }
@@ -188,10 +212,31 @@ class ConfigService
         $ultramsgConfig = config('whatsapp.ultramsg', []);
         $defaultInstanceId = $ultramsgConfig['instance_id'] ?? null;
         
-        if ($defaultInstanceId && ($defaultInstanceId === $instanceId || $defaultInstanceId === 'instance' . $instanceId || 'instance' . $defaultInstanceId === $instanceId)) {
-            // Return 'default' as subAccountId if instance matches default
-            return 'default';
+        Log::info('Checking default instance_id match', [
+            'instanceId' => $instanceId,
+            'defaultInstanceId' => $defaultInstanceId,
+        ]);
+        
+        if ($defaultInstanceId) {
+            // Normalize both for comparison
+            $normalizedDefault = str_replace('instance', '', (string) $defaultInstanceId);
+            $normalizedIncoming = str_replace('instance', '', $instanceId);
+            
+            if ($normalizedDefault === $normalizedIncoming) {
+                Log::info('Found subAccountId via default instance_id match', [
+                    'instanceId' => $instanceId,
+                    'defaultInstanceId' => $defaultInstanceId,
+                    'subAccountId' => 'default',
+                ]);
+                return 'default';
+            }
         }
+        
+        Log::warning('No subAccountId found for instanceId', [
+            'instanceId' => $instanceId,
+            'config_keys' => array_keys($config),
+            'defaultInstanceId' => $defaultInstanceId,
+        ]);
         
         return null;
     }
