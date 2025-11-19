@@ -221,7 +221,7 @@ class GHLService
         $responseData = $response->json();
         
         Log::info('GHL message created successfully', [
-            'message_id' => $responseData['message']['id'] ?? $responseData['id'] ?? null,
+            'message_id' => $responseData['messageId'] ?? $responseData['message']['id'] ?? $responseData['id'] ?? null,
             'conversation_id' => $responseData['conversationId'] ?? null,
         ]);
 
