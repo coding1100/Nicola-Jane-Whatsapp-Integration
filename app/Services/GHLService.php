@@ -132,54 +132,49 @@ class GHLService
             throw new \RuntimeException('Either conversationId or contactId is required for GHL inbound message');
         }
 
-        // Build payload according to GHL API documentation
-        // type must be "InboundMessage" for inbound messages
-        $payload['type'] = 'InboundMessage';
+        // Build payload in exact schema order
+        // 1. type - Try matching messageType since "InboundMessage" is being rejected
+        // The type field enum might need to match the channel type
+        $payload['type'] = $type; // e.g. "WhatsApp" to match messageType
         
-        // locationId
+        // 2. locationId
         if ($locationId) {
             $payload['locationId'] = $locationId;
         }
         
-        // attachments - Only include if not empty (empty array causes validation error)
+        // 3. attachments - Only include if not empty (empty array causes validation error)
         if (!empty($attachmentUrls)) {
             $payload['attachments'] = $attachmentUrls;
         }
         
-        // body
+        // 4. body
         if ($message) {
             $payload['body'] = $message;
         }
         
-        // contactId
+        // 5. contactId
         if ($contactId) {
             $payload['contactId'] = $contactId;
         }
         
-        // contentType
+        // 6. contentType
         $payload['contentType'] = 'text/plain';
         
-        // conversationId
+        // 7. conversationId
         if ($conversationId) {
             $payload['conversationId'] = $conversationId;
         }
         
-        // dateAdded
+        // 8. dateAdded
         $payload['dateAdded'] = now()->utc()->format('Y-m-d\TH:i:s.v\Z');
         
-        // direction
+        // 9. direction
         $payload['direction'] = 'inbound';
         
-        // messageType - Must be uppercase enum value (WHATSAPP, SMS, EMAIL, etc.)
-        // Map the type parameter to proper GHL messageType enum
-        $messageTypeMap = [
-            'WhatsApp' => 'WHATSAPP',
-            'SMS' => 'SMS',
-            'Email' => 'EMAIL',
-        ];
-        $payload['messageType'] = $messageTypeMap[$type] ?? strtoupper($type);
+        // 10. messageType
+        $payload['messageType'] = $type;
         
-        // status
+        // 11. status
         $payload['status'] = 'delivered';
         
         // Optional fields (12-17) not included unless needed
@@ -285,18 +280,10 @@ class GHLService
         ]);
 
         $createUrl      = 'https://services.leadconnectorhq.com/conversations/';
-        // Map type to GHL conversation type (should match messageType)
-        $conversationTypeMap = [
-            'WhatsApp' => 'whatsapp',
-            'SMS' => 'sms',
-            'Email' => 'email',
-        ];
-        $conversationType = $conversationTypeMap[$type] ?? strtolower($type);
-        
         $createPayload = [
             'contactId'  => $contactId,
             'locationId' => $locationId,
-            'type'       => $conversationType,
+            'type'       => strtolower($type),
         ];
 
         $createResponse = Http::withHeaders([
