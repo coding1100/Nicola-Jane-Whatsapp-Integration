@@ -151,11 +151,8 @@ class GHLService
             $payload['locationId'] = $locationId;
         }
 
-        // Type field is required by GHL API - must be "InboundMessage"
-        $payload['type'] = 'InboundMessage';
-        
-        // messageType field specifies the communication channel
-        // For WhatsApp, use uppercase "WHATSAPP"
+        // Try using only messageType field (type field might not be needed for this endpoint)
+        // messageType specifies the communication channel
         $payload['messageType'] = strtoupper($type); // e.g. "WHATSAPP"
 
         if (!empty($attachmentUrls)) {
