@@ -324,7 +324,7 @@ class WhatsAppController extends Controller
                 $contactId,
                 $text,
                 $media,
-                'whatsapp',
+                'WhatsApp',
                 $locationId
             );
             
