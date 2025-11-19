@@ -333,7 +333,7 @@ class WhatsAppController extends Controller
             ]);
 
             $ultramsgMessageId = $incoming->messageId;
-            $ghlMessageId      = $ghlMessageResponse['message']['id'] ?? $ghlMessageResponse['id'] ?? null;
+            $ghlMessageId      = $ghlMessageResponse['messageId'] ?? $ghlMessageResponse['message']['id'] ?? $ghlMessageResponse['id'] ?? null;
 
             if ($ultramsgMessageId && $ghlMessageId) {
                 ConfigService::storeMessageMapping($ultramsgMessageId, $ghlMessageId, $subAccountId);
