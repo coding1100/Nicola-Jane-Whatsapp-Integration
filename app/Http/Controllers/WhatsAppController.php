@@ -229,6 +229,28 @@ class WhatsAppController extends Controller
             $media       = $incoming->media;
             $instanceId  = $incoming->instanceId;
             $referenceId = $incoming->referenceId;
+            
+            // Log values immediately after extraction from parsed object
+            Log::info('Values extracted from parsed incoming object', [
+                'phone' => $phone,
+                'phone_type' => gettype($phone),
+                'phone_empty' => empty($phone),
+                'text' => $text,
+                'text_type' => gettype($text),
+                'text_is_null' => is_null($text),
+                'text_is_string' => is_string($text),
+                'text_empty' => empty($text),
+                'text_length' => is_string($text) ? strlen($text) : 0,
+                'text_trimmed' => is_string($text) ? trim($text) : 'N/A',
+                'text_trimmed_length' => is_string($text) ? strlen(trim($text)) : 0,
+                'media' => $media,
+                'media_type' => gettype($media),
+                'media_is_array' => is_array($media),
+                'media_empty' => empty($media),
+                'media_count' => is_array($media) ? count($media) : 0,
+                'instanceId' => $instanceId,
+                'referenceId' => $referenceId,
+            ]);
 
             $subAccountId = $referenceId ? preg_replace('/_\d+$/', '', $referenceId) : null;
             Log::info('Sub-account resolution attempt', [
@@ -317,6 +339,27 @@ class WhatsAppController extends Controller
                 $this->ghl->removeTags($ghlAPIKey, $contactId, ['whatsapp_unsubscribed'], $locationId);
             }
 
+            // Validate message content before sending to GHL
+            Log::info('Validating message before sending to GHL', [
+                'text' => $text,
+                'text_type' => gettype($text),
+                'text_is_string' => is_string($text),
+                'text_is_empty' => empty($text),
+                'text_is_null' => is_null($text),
+                'text_trimmed' => is_string($text) ? trim($text) : 'N/A',
+                'text_trimmed_length' => is_string($text) ? strlen(trim($text)) : 0,
+                'media' => $media,
+                'media_type' => gettype($media),
+                'media_is_array' => is_array($media),
+                'media_count' => is_array($media) ? count($media) : 0,
+                'contactId' => $contactId,
+                'contactId_type' => gettype($contactId),
+                'contactId_empty' => empty($contactId),
+                'locationId' => $locationId,
+                'locationId_type' => gettype($locationId),
+                'locationId_empty' => empty($locationId),
+            ]);
+            
             // Always log the inbound message in conversations
             Log::info('Creating GHL conversation message', [
                 'contactId' => $contactId,

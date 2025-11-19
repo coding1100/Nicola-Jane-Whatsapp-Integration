@@ -244,6 +244,19 @@ class UltramsgService
                 $mediaArray = array_values(array_filter($mediaArray, fn ($m) => !empty($m['url'])));
             }
 
+            // Log body value before validation
+            Log::info('Body value before validation check', [
+                'body' => $body,
+                'body_type' => gettype($body),
+                'body_is_null' => is_null($body),
+                'body_is_string' => is_string($body),
+                'body_empty' => empty($body),
+                'body_length' => is_string($body) ? strlen($body) : 0,
+                'body_trimmed' => is_string($body) ? trim($body) : 'N/A',
+                'body_trimmed_length' => is_string($body) ? strlen(trim($body)) : 0,
+                'body_truthy' => (bool)$body,
+            ]);
+
             if (!$phone || (!$body && empty($mediaArray))) {
                 Log::warning('parseIncomingMessage validation failed', [
                     'has_phone' => !empty($phone),
@@ -251,11 +264,14 @@ class UltramsgService
                     'has_media' => !empty($mediaArray),
                     'phone' => $phone,
                     'body' => $body,
+                    'body_type' => gettype($body),
+                    'body_empty' => empty($body),
                 ]);
                 return null;
             }
 
-            return (object) [
+            // Log final parsed object values
+            $parsedObject = (object) [
                 'phone'       => $phone,
                 'message'     => $body,
                 'media'       => $mediaArray,
@@ -263,6 +279,20 @@ class UltramsgService
                 'referenceId' => $referenceId,
                 'messageId'   => $msgId,
             ];
+            
+            Log::info('parseIncomingMessage returning parsed object', [
+                'phone' => $parsedObject->phone,
+                'message' => $parsedObject->message,
+                'message_type' => gettype($parsedObject->message),
+                'message_empty' => empty($parsedObject->message),
+                'message_length' => is_string($parsedObject->message) ? strlen($parsedObject->message) : 0,
+                'media_count' => count($parsedObject->media),
+                'instanceId' => $parsedObject->instanceId,
+                'referenceId' => $parsedObject->referenceId,
+                'messageId' => $parsedObject->messageId,
+            ]);
+            
+            return $parsedObject;
         } catch (\Exception $e) {
             Log::error('Error parsing Ultramsg incoming message', [
                 'error'   => $e->getMessage(),

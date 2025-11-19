@@ -87,6 +87,31 @@ class GHLService
         string $type = 'WhatsApp',
         ?string $locationId = null
     ): array {
+        // Log function entry with all parameters
+        Log::info('GHLService::createConversationMessage called', [
+            'apiKey' => $apiKey ? 'SET' : 'EMPTY',
+            'apiKey_length' => strlen($apiKey ?? ''),
+            'contactId' => $contactId,
+            'contactId_type' => gettype($contactId),
+            'contactId_empty' => empty($contactId),
+            'message' => $message,
+            'message_type' => gettype($message),
+            'message_is_null' => is_null($message),
+            'message_is_string' => is_string($message),
+            'message_empty' => empty($message),
+            'message_length' => is_string($message) ? strlen($message) : 0,
+            'message_trimmed' => is_string($message) ? trim($message) : 'N/A',
+            'message_trimmed_length' => is_string($message) ? strlen(trim($message)) : 0,
+            'media' => $media,
+            'media_type' => gettype($media),
+            'media_is_array' => is_array($media),
+            'media_empty' => empty($media),
+            'media_count' => is_array($media) ? count($media) : 0,
+            'type' => $type,
+            'locationId' => $locationId,
+            'locationId_empty' => empty($locationId),
+        ]);
+        
         $conversationId = null;
         $attachmentUrls = [];
 
@@ -148,8 +173,26 @@ class GHLService
         }
         
         // 4. body
+        Log::info('Building payload body field', [
+            'message' => $message,
+            'message_type' => gettype($message),
+            'message_is_null' => is_null($message),
+            'message_empty' => empty($message),
+            'message_truthy' => (bool)$message,
+            'will_include_body' => !empty($message),
+        ]);
+        
         if ($message) {
             $payload['body'] = $message;
+            Log::info('Body field added to payload', [
+                'body_value' => $payload['body'],
+                'body_length' => strlen($payload['body']),
+            ]);
+        } else {
+            Log::warning('Body field NOT added to payload - message is empty/null', [
+                'message' => $message,
+                'message_type' => gettype($message),
+            ]);
         }
         
         // 5. contactId
@@ -179,14 +222,27 @@ class GHLService
         
         // Optional fields (12-17) not included unless needed
 
-        // Log payload before sending
-        Log::info('Sending inbound message to GHL', [
+        // Log payload before sending with detailed validation
+        Log::info('Final payload validation before sending to GHL', [
             'url' => $url,
             'payload' => $payload,
+            'payload_keys' => array_keys($payload),
+            'payload_json' => json_encode($payload),
             'hasConversationId' => !empty($conversationId),
+            'conversationId' => $conversationId,
             'hasContactId' => !empty($contactId),
-            'hasBody' => !empty($message),
+            'contactId' => $contactId,
+            'hasBody' => isset($payload['body']),
+            'body_value' => $payload['body'] ?? 'NOT_SET',
+            'body_type' => isset($payload['body']) ? gettype($payload['body']) : 'N/A',
+            'body_length' => isset($payload['body']) && is_string($payload['body']) ? strlen($payload['body']) : 0,
+            'body_empty' => isset($payload['body']) ? empty($payload['body']) : true,
             'hasLocationId' => !empty($locationId),
+            'locationId' => $locationId,
+            'hasAttachments' => isset($payload['attachments']),
+            'attachments_count' => isset($payload['attachments']) && is_array($payload['attachments']) ? count($payload['attachments']) : 0,
+            'original_message_param' => $message,
+            'original_message_type' => gettype($message),
         ]);
 
         $response = Http::withHeaders([
@@ -223,6 +279,18 @@ class GHLService
         Log::info('GHL message created successfully', [
             'message_id' => $responseData['messageId'] ?? $responseData['message']['id'] ?? $responseData['id'] ?? null,
             'conversation_id' => $responseData['conversationId'] ?? null,
+            'full_response' => $responseData,
+        ]);
+        
+        // Log what was actually sent vs what was received
+        Log::info('Message flow summary - sent vs received', [
+            'sent_payload_body' => $payload['body'] ?? 'NOT_SET',
+            'sent_payload_body_length' => isset($payload['body']) && is_string($payload['body']) ? strlen($payload['body']) : 0,
+            'original_message_param' => $message,
+            'original_message_length' => is_string($message) ? strlen($message) : 0,
+            'received_messageId' => $responseData['messageId'] ?? null,
+            'received_conversationId' => $responseData['conversationId'] ?? null,
+            'response_success' => $responseData['success'] ?? false,
         ]);
 
         return $responseData;
