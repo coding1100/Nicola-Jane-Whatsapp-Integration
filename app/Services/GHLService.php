@@ -62,9 +62,17 @@ class GHLService
         $conversationId = null;
         $attachmentUrls = [];
 
-        if (!empty($media) && $locationId) {
+        // Always get or create conversation first (required by GHL)
+        if ($locationId) {
             $conversationId = $this->getOrCreateConversation($apiKey, $contactId, $locationId, $type);
+            Log::info('Conversation obtained/created', [
+                'conversationId' => $conversationId,
+                'contactId' => $contactId,
+            ]);
+        }
 
+        // Handle media attachments if present
+        if (!empty($media) && $conversationId) {
             foreach ($media as $mediaItem) {
                 $mediaUrl  = is_array($mediaItem) ? ($mediaItem['url'] ?? $mediaItem['media'] ?? null) : $mediaItem;
                 $mediaType = is_array($mediaItem) ? ($mediaItem['type'] ?? 'image') : 'image';
@@ -85,28 +93,35 @@ class GHLService
             }
         }
 
-        $url = 'https://services.leadconnectorhq.com/conversations/messages/';
+        // Use /inbound endpoint for incoming messages (per GHL official docs)
+        $url = 'https://services.leadconnectorhq.com/conversations/messages/inbound';
 
-        $payload = [
-            'contactId' => $contactId,
-            // best-effort – actual schema is “body” in webhooks,
-            // but for sending they accept “message/body” depending on channel.
-        ];
+        // Build payload per GHL API documentation for /conversations/messages/inbound
+        $payload = [];
 
+        // Either conversationId OR contactId is required (per GHL docs)
+        // Include both if available for better association
+        if ($conversationId) {
+            $payload['conversationId'] = $conversationId;
+        }
+        
+        if ($contactId) {
+            $payload['contactId'] = $contactId;
+        }
+
+        // Message body field - GHL inbound endpoint uses "body"
         if ($message) {
-            $payload['message'] = $message;
+            $payload['body'] = $message;
         }
 
         if ($locationId) {
             $payload['locationId'] = $locationId;
         }
 
-        // Channel / messageType – this may be interpreted as WhatsApp channel when configured
-        $payload['messageType'] = strtoupper($type); // e.g. WHATSAPP
-        // Some installs also accept 'channel' or 'type', but we avoid guessing too much.
+        // Channel type - GHL uses "type" field for inbound messages
+        $payload['type'] = strtolower($type); // e.g. "whatsapp"
 
         if (!empty($attachmentUrls)) {
-            // Most implementations accept simple URL array; if they later require objects, you adjust here.
             $payload['attachments'] = $attachmentUrls;
         }
 
