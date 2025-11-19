@@ -84,7 +84,7 @@ class GHLService
         string $contactId,
         ?string $message,
         ?array $media,
-        string $type = 'whatsapp',
+        string $type = 'WhatsApp',
         ?string $locationId = null
     ): array {
         $conversationId = null;
@@ -153,7 +153,7 @@ class GHLService
 
         // Required fields per GHL API documentation example
         $payload['type'] = 'InboundMessage';
-        $payload['messageType'] = strtoupper($type); // e.g. "WHATSAPP" for WhatsApp, "SMS" for SMS
+        $payload['messageType'] = $type;
         $payload['contentType'] = 'text/plain';
         $payload['dateAdded'] = now()->utc()->format('Y-m-d\TH:i:s.v\Z');
         $payload['direction'] = 'inbound';
