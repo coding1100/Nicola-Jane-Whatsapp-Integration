@@ -18,37 +18,29 @@ class ConfigService
      */
     public static function getUltramsgCredentials(?string $subAccountId = null): ?array
     {
-        if (!$subAccountId) {
-            // Get from config file only
-            $config = config('whatsapp.ultramsg', []);
-            $defaultInstanceId = $config['instance_id'] ?? null;
-            $defaultApiToken = $config['api_token'] ?? null;
-
-            if ($defaultInstanceId && $defaultApiToken) {
+        // Only check config file - no database lookup
+        $config = config('whatsapp.ultramsg', []);
+        
+        // If subAccountId is provided, check for sub-account specific credentials first
+        if ($subAccountId) {
+            $subAccountConfig = $config['sub_accounts'][$subAccountId] ?? null;
+            if ($subAccountConfig && !empty($subAccountConfig['instance_id']) && !empty($subAccountConfig['api_token'])) {
                 return [
-                    'instanceId' => $defaultInstanceId,
-                    'apiToken' => $defaultApiToken
+                    'instanceId' => $subAccountConfig['instance_id'],
+                    'apiToken' => $subAccountConfig['api_token']
                 ];
             }
-            return null;
         }
 
-        try {
-            $credential = DB::table('whatsapp_credentials')
-                ->where('sub_account_id', $subAccountId)
-                ->first();
+        // Fallback to default credentials from config
+        $defaultInstanceId = $config['instance_id'] ?? null;
+        $defaultApiToken = $config['api_token'] ?? null;
 
-            if ($credential) {
-                return [
-                    'instanceId' => $credential->instance_id,
-                    'apiToken' => $credential->api_token
-                ];
-            }
-        } catch (\Exception $e) {
-            Log::error('Error fetching Ultramsg credentials from database', [
-                'error' => $e->getMessage(),
-                'subAccountId' => $subAccountId,
-            ]);
+        if ($defaultInstanceId && $defaultApiToken) {
+            return [
+                'instanceId' => $defaultInstanceId,
+                'apiToken' => $defaultApiToken
+            ];
         }
 
         return null;
