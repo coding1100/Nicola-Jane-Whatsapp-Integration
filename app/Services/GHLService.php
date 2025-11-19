@@ -29,20 +29,48 @@ class GHLService
         ])->post($url, $payload);
 
         if (!$response->successful()) {
+            $errorBody = $response->body();
+            $errorJson = $response->json();
+            
+            // Handle duplicate contact error - GHL returns contactId in meta field
+            if ($response->status() === 400 && isset($errorJson['message']) && 
+                str_contains($errorJson['message'], 'duplicated contacts') && 
+                isset($errorJson['meta']['contactId'])) {
+                
+                $contactId = $errorJson['meta']['contactId'];
+                
+                Log::info('Contact already exists (duplicate), using existing contactId', [
+                    'contactId' => $contactId,
+                    'phone' => $phone,
+                    'contactName' => $errorJson['meta']['contactName'] ?? null,
+                ]);
+                
+                return $contactId;
+            }
+            
             Log::error('GHL findOrCreateContactByPhone failed', [
                 'status' => $response->status(),
-                'body'   => $response->body(),
+                'body'   => $errorBody,
+                'json'   => $errorJson,
                 'phone'  => $phone,
             ]);
-            throw new \RuntimeException('GHL findOrCreateContactByPhone failed: ' . $response->body());
+            throw new \RuntimeException('GHL findOrCreateContactByPhone failed: ' . $errorBody);
         }
 
         $contactData = $response->json();
         $contactId   = $contactData['contact']['id'] ?? $contactData['id'] ?? null;
 
         if (!$contactId) {
+            Log::error('GHL contact creation did not return contactId', [
+                'response' => $contactData,
+            ]);
             throw new \RuntimeException('GHL contact creation did not return contactId');
         }
+
+        Log::info('Contact found/created successfully', [
+            'contactId' => $contactId,
+            'phone' => $phone,
+        ]);
 
         return $contactId;
     }
@@ -109,6 +137,11 @@ class GHLService
             $payload['contactId'] = $contactId;
         }
 
+        // Validate required fields
+        if (empty($payload['conversationId']) && empty($payload['contactId'])) {
+            throw new \RuntimeException('Either conversationId or contactId is required for GHL inbound message');
+        }
+
         // Message body field - GHL inbound endpoint uses "body"
         if ($message) {
             $payload['body'] = $message;
@@ -125,22 +158,53 @@ class GHLService
             $payload['attachments'] = $attachmentUrls;
         }
 
+        // Log payload before sending
+        Log::info('Sending inbound message to GHL', [
+            'url' => $url,
+            'payload' => $payload,
+            'hasConversationId' => !empty($conversationId),
+            'hasContactId' => !empty($contactId),
+            'hasBody' => !empty($message),
+            'hasLocationId' => !empty($locationId),
+        ]);
+
         $response = Http::withHeaders([
             'Authorization' => "Bearer {$apiKey}",
             'Content-Type'  => 'application/json',
             'Version'       => '2021-07-28',
         ])->post($url, $payload);
 
+        // Log full response for debugging
+        Log::info('GHL API response received', [
+            'status' => $response->status(),
+            'successful' => $response->successful(),
+            'response_body' => $response->body(),
+            'response_json' => $response->json(),
+        ]);
+
         if (!$response->successful()) {
+            $errorBody = $response->body();
+            $errorJson = $response->json();
+            
             Log::error('GHL createConversationMessage failed', [
                 'status'  => $response->status(),
-                'body'    => $response->body(),
+                'body'    => $errorBody,
+                'json'    => $errorJson,
                 'payload' => $payload,
+                'url'     => $url,
             ]);
-            throw new \RuntimeException('GHL createConversationMessage failed: ' . $response->body());
+            
+            throw new \RuntimeException('GHL createConversationMessage failed (HTTP ' . $response->status() . '): ' . $errorBody);
         }
 
-        return $response->json();
+        $responseData = $response->json();
+        
+        Log::info('GHL message created successfully', [
+            'message_id' => $responseData['message']['id'] ?? $responseData['id'] ?? null,
+            'conversation_id' => $responseData['conversationId'] ?? null,
+        ]);
+
+        return $responseData;
     }
 
     /**
@@ -149,6 +213,11 @@ class GHLService
     private function getOrCreateConversation(string $apiKey, string $contactId, string $locationId, string $type): string
     {
         $url = 'https://services.leadconnectorhq.com/conversations/';
+
+        Log::info('Checking for existing conversation', [
+            'contactId' => $contactId,
+            'locationId' => $locationId,
+        ]);
 
         $response = Http::withHeaders([
             'Authorization' => "Bearer {$apiKey}",
@@ -162,32 +231,66 @@ class GHLService
         if ($response->successful()) {
             $data          = $response->json();
             $conversations = $data['conversations'] ?? $data['data'] ?? [];
+            
+            Log::info('Existing conversations found', [
+                'count' => count($conversations),
+                'conversations' => $conversations,
+            ]);
+            
             if (!empty($conversations)) {
-                return $conversations[0]['id'] ?? $conversations[0]['conversationId'] ?? null;
+                $conversationId = $conversations[0]['id'] ?? $conversations[0]['conversationId'] ?? null;
+                if ($conversationId) {
+                    Log::info('Using existing conversation', ['conversationId' => $conversationId]);
+                    return $conversationId;
+                }
             }
+        } else {
+            Log::warning('Failed to fetch existing conversations', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
         }
 
+        // Create new conversation
+        Log::info('Creating new conversation', [
+            'contactId' => $contactId,
+            'locationId' => $locationId,
+            'type' => $type,
+        ]);
+
         $createUrl      = 'https://services.leadconnectorhq.com/conversations/';
+        $createPayload = [
+            'contactId'  => $contactId,
+            'locationId' => $locationId,
+            'type'       => strtolower($type),
+        ];
+
         $createResponse = Http::withHeaders([
             'Authorization' => "Bearer {$apiKey}",
             'Content-Type'  => 'application/json',
             'Version'       => '2021-07-28',
-        ])->post($createUrl, [
-            'contactId'  => $contactId,
-            'locationId' => $locationId,
-            'type'       => $type,
-        ]);
+        ])->post($createUrl, $createPayload);
 
         if (!$createResponse->successful()) {
-            throw new \RuntimeException('Failed to create conversation: ' . $createResponse->body());
+            Log::error('Failed to create conversation', [
+                'status' => $createResponse->status(),
+                'body' => $createResponse->body(),
+                'payload' => $createPayload,
+            ]);
+            throw new \RuntimeException('Failed to create conversation (HTTP ' . $createResponse->status() . '): ' . $createResponse->body());
         }
 
         $conversationData = $createResponse->json();
-        $conversationId   = $conversationData['conversation']['id'] ?? $conversationData['id'] ?? null;
+        $conversationId   = $conversationData['conversation']['id'] ?? $conversationData['id'] ?? $conversationData['conversationId'] ?? null;
 
         if (!$conversationId) {
-            throw new \RuntimeException('Conversation creation did not return id');
+            Log::error('Conversation creation did not return id', [
+                'response' => $conversationData,
+            ]);
+            throw new \RuntimeException('Conversation creation did not return id. Response: ' . json_encode($conversationData));
         }
+
+        Log::info('New conversation created', ['conversationId' => $conversationId]);
 
         return $conversationId;
     }
