@@ -3,397 +3,548 @@
 namespace App\Http\Controllers;
 
 use App\Services\ConfigService;
+use App\Services\UltramsgService;
+use App\Services\GHLService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class WhatsAppController extends Controller
 {
+    public function __construct(
+        private UltramsgService $ultramsg,
+        private GHLService $ghl,
+    ) {}
+
     /**
-     * Health check endpoint
+     * GET / or /health
      */
     public function healthCheck(): JsonResponse
     {
         return response()->json([
-            'status' => 'ok',
-            'message' => 'WhatsApp Bridge API is running',
-            'endpoints' => ['/send', '/incoming', '/status']
+            'status'    => 'ok',
+            'message'   => 'WhatsApp Bridge API is running',
+            'endpoints' => ['/send', '/incoming', '/status', '/onboard', '/onboard/qr'],
         ]);
     }
 
     /**
      * POST /send
-     * Receives messages from GHL and sends via Ultramsg
-     * Expected payload from GHL:
-     * {
-     *   "message": "Hello, this is a test message",
-     *   "phone": "+1234567890",
-     *   "subAccountId": "sub_account_123"
-     * }
+     *
+     * This is what GHL workflows call instead of SMS when you map SMS steps → HTTP webhook (Option A).
      */
     public function send(Request $request): JsonResponse
     {
         try {
-            $message = $request->input('message');
-            $phone = $request->input('phone');
-            $subAccountId = $request->input('subAccountId');
+            $message     = $request->input('message');
+            $phone       = $request->input('phone');
+            $subAccountId= $request->input('subAccountId');
+            $locationId  = $request->input('locationId');
+            $mediaUrl    = $request->input('mediaUrl');
+            $mediaType   = $request->input('mediaType', 'image'); // image, document, audio, video
 
-            // Validate required fields
-            if (!$message || !$phone) {
+            if (!$phone || !$subAccountId) {
                 return response()->json([
-                    'error' => 'Missing required fields',
-                    'required' => ['message', 'phone']
+                    'error'    => 'Missing required fields',
+                    'required' => ['phone', 'subAccountId'],
                 ], 400);
             }
 
-            // Look up Ultramsg credentials based on sub-account ID
-            $credentials = ConfigService::getUltramsgCredentials($subAccountId);
-            if (!$credentials) {
+            if (!$message && !$mediaUrl) {
                 return response()->json([
-                    'error' => 'Ultramsg credentials not found for sub-account',
-                    'message' => 'Please configure ULTRAMSG_INSTANCE_ID and ULTRAMSG_API_TOKEN in .env file or config.js',
-                    'subAccountId' => $subAccountId
+                    'error'    => 'At least one of message or mediaUrl is required',
+                    'required' => ['message or mediaUrl', 'phone', 'subAccountId'],
+                ], 400);
+            }
+
+            $creds = ConfigService::getUltramsgCredentials($subAccountId);
+            if (!$creds) {
+                return response()->json([
+                    'error'       => 'Ultramsg credentials not configured for this sub-account',
+                    'subAccountId'=> $subAccountId,
                 ], 401);
             }
 
-            $instanceId = $credentials['instanceId'];
-            $apiToken = $credentials['apiToken'];
+            $referenceId = $subAccountId . '_' . time();
 
-            // Send message via Ultramsg API
-            // Ultramsg supports both query param token and Bearer token authentication
-            // Using query param method as specified in requirements
-            $url = "https://api.ultramsg.com/{$instanceId}/messages/chat?token=" . urlencode($apiToken);
-            $ultramsgResponse = Http::withHeaders([
-                'Content-Type' => 'application/json'
-            ])->post($url, [
-                'to' => $phone,
-                'body' => $message
-            ]);
+            // send via Ultramsg
+            if ($mediaUrl) {
+                switch (strtolower($mediaType)) {
+                    case 'image':
+                        $waResponse = $this->ultramsg->sendImage(
+                            $creds['instanceId'],
+                            $creds['apiToken'],
+                            $phone,
+                            $mediaUrl,
+                            $message,
+                            $referenceId
+                        );
+                        break;
 
-            if ($ultramsgResponse->successful()) {
-                $responseData = $ultramsgResponse->json();
+                    case 'document':
+                        $waResponse = $this->ultramsg->sendDocument(
+                            $creds['instanceId'],
+                            $creds['apiToken'],
+                            $phone,
+                            $mediaUrl,
+                            null,
+                            $referenceId
+                        );
+                        break;
 
-                Log::info('Message sent successfully:', [
-                    'phone' => $phone,
-                    'messageId' => $responseData['id'] ?? null,
-                    'subAccountId' => $subAccountId
-                ]);
+                    case 'audio':
+                        $waResponse = $this->ultramsg->sendAudio(
+                            $creds['instanceId'],
+                            $creds['apiToken'],
+                            $phone,
+                            $mediaUrl,
+                            $referenceId
+                        );
+                        break;
 
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Message sent successfully',
-                    'data' => $responseData,
-                    'phone' => $phone,
-                    'subAccountId' => $subAccountId
-                ]);
+                    case 'video':
+                        $waResponse = $this->ultramsg->sendVideo(
+                            $creds['instanceId'],
+                            $creds['apiToken'],
+                            $phone,
+                            $mediaUrl,
+                            $message,
+                            $referenceId
+                        );
+                        break;
+
+                    default:
+                        return response()->json([
+                            'error'   => 'Invalid mediaType',
+                            'allowed' => ['image', 'document', 'audio', 'video'],
+                        ], 400);
+                }
             } else {
-                $errorData = $ultramsgResponse->json();
-                $statusCode = $ultramsgResponse->status();
-
-                Log::error('Error sending message:', [
-                    'status' => $statusCode,
-                    'error' => $errorData
-                ]);
-
-                return response()->json([
-                    'error' => 'Failed to send message',
-                    'message' => $errorData['message'] ?? 'Unknown error',
-                    'details' => $errorData
-                ], $statusCode);
+                $waResponse = $this->ultramsg->sendText(
+                    $creds['instanceId'],
+                    $creds['apiToken'],
+                    $phone,
+                    $message,
+                    $referenceId
+                );
             }
 
-        } catch (\Exception $error) {
-            Log::error('Error sending message:', [
-                'message' => $error->getMessage(),
-                'trace' => $error->getTraceAsString()
+            $ultramsgMessageId = $waResponse['id'] ?? $waResponse['messageId'] ?? null;
+
+            if ($ultramsgMessageId && $locationId) {
+                try {
+                    $ghlAPIKey = ConfigService::getGHLAPIKey($subAccountId);
+                    if ($ghlAPIKey) {
+                        $contactId  = $this->ghl->findOrCreateContactByPhone($ghlAPIKey, $phone, $locationId);
+                        $ghlMessage = $this->ghl->createConversationMessage(
+                            $ghlAPIKey,
+                            $contactId,
+                            $message,
+                            $mediaUrl ? [['url' => $mediaUrl, 'type' => $mediaType]] : null,
+                            'whatsapp',
+                            $locationId
+                        );
+                        $ghlMessageId = $ghlMessage['message']['id'] ?? $ghlMessage['id'] ?? null;
+                        if ($ghlMessageId && $ultramsgMessageId) {
+                            ConfigService::storeMessageMapping($ultramsgMessageId, $ghlMessageId, $subAccountId);
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Failed to create GHL message for mapping', [
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            Log::info('WhatsApp message sent', [
+                'phone'            => $phone,
+                'subAccountId'     => $subAccountId,
+                'ultramsgMessageId'=> $ultramsgMessageId,
             ]);
 
             return response()->json([
-                'error' => 'Failed to send message',
-                'message' => $error->getMessage()
+                'success'      => true,
+                'message'      => 'WhatsApp message sent',
+                'data'         => $waResponse,
+                'subAccountId' => $subAccountId,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error sending WhatsApp message', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error'   => 'Failed to send WhatsApp message',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
      * POST /incoming
-     * Receives webhooks from Ultramsg and forwards to GHL
-     * Expected payload from Ultramsg webhook format
+     * Ultramsg webhook → GHL conversation message + keyword routing (Option 1).
      */
     public function incoming(Request $request): JsonResponse
     {
+        // STEP 1: Log raw webhook payload immediately
+        $payload = $request->all();
+        Log::info('Incoming WA Webhook Raw:', [
+            'payload' => $payload,
+            'headers' => $request->headers->all(),
+            'method' => $request->method(),
+            'url' => $request->fullUrl(),
+        ]);
+
         try {
-            $ultramsgData = $request->all();
+            $incoming = $this->ultramsg->parseIncomingMessage($payload);
 
-            // Extract message data from Ultramsg webhook format
-            $messageData = $this->extractMessageData($ultramsgData);
-
-            if (!$messageData) {
+            if (!$incoming) {
+                Log::error('parseIncomingMessage returned null', [
+                    'payload' => $payload,
+                    'payload_keys' => array_keys($payload),
+                ]);
+                
                 return response()->json([
-                    'error' => 'Invalid webhook data format'
+                    'error'   => 'Invalid Ultramsg webhook payload',
+                    'payload' => $payload,
                 ], 400);
             }
 
-            $contactId = $messageData['contactId'];
-            $message = $messageData['message'];
-            $phone = $messageData['phone'];
-            $subAccountId = $messageData['subAccountId'];
+            Log::info('Parsed incoming message successfully', [
+                'phone' => $incoming->phone,
+                'message' => $incoming->message,
+                'instanceId' => $incoming->instanceId,
+                'referenceId' => $incoming->referenceId,
+            ]);
 
-            // Get GHL API key for the sub-account
+            $phone       = $incoming->phone;
+            $text        = $incoming->message;
+            $media       = $incoming->media;
+            $instanceId  = $incoming->instanceId;
+            $referenceId = $incoming->referenceId;
+
+            $subAccountId = $referenceId ? preg_replace('/_\d+$/', '', $referenceId) : null;
+            Log::info('Sub-account resolution attempt', [
+                'referenceId' => $referenceId,
+                'extracted_subAccountId' => $subAccountId,
+                'instanceId' => $instanceId,
+            ]);
+
+            if (!$subAccountId) {
+                $subAccountId = ConfigService::getSubAccountIdByInstance($instanceId);
+                Log::info('Looking up subAccountId by instanceId', [
+                    'instanceId' => $instanceId,
+                    'found_subAccountId' => $subAccountId,
+                ]);
+            }
+
+            if (!$subAccountId) {
+                Log::error('Missing subAccountId for incoming WhatsApp message', [
+                    'phone'       => $phone,
+                    'instanceId'  => $instanceId,
+                    'referenceId' => $referenceId,
+                    'payload_keys' => array_keys($payload),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error'   => 'Sub-account could not be resolved',
+                    'instanceId' => $instanceId,
+                    'referenceId' => $referenceId,
+                ], 400);
+            }
+
+            Log::info('Sub-account resolved', ['subAccountId' => $subAccountId]);
+
             $ghlAPIKey = ConfigService::getGHLAPIKey($subAccountId);
             if (!$ghlAPIKey) {
+                Log::error('GHL API key not configured', [
+                    'subAccountId' => $subAccountId,
+                ]);
+                
                 return response()->json([
-                    'error' => 'GHL API key not found for sub-account',
-                    'message' => 'Please configure GHL_API_KEY in .env file or config.js',
-                    'subAccountId' => $subAccountId
+                    'error'       => 'GHL API key not configured for this sub-account',
+                    'subAccountId'=> $subAccountId,
                 ], 401);
             }
 
-            // Forward message to GHL API
-            // Note: GHL API v1 is end-of-support but still functional
-            // For new integrations, consider migrating to API v2 with OAuth 2.0
-            // API v2 endpoint: https://services.leadconnectorhq.com/conversations/messages
-            $ghlResponse = Http::withHeaders([
-                'Authorization' => "Bearer {$ghlAPIKey}",
-                'Content-Type' => 'application/json'
-            ])->post('https://rest.gohighlevel.com/v1/conversations/messages/', [
-                'type' => 'whatsapp',
-                'contactId' => $contactId,
-                'message' => $message
-            ]);
+            Log::info('GHL API key found', ['subAccountId' => $subAccountId]);
 
-            if ($ghlResponse->successful()) {
-                $responseData = $ghlResponse->json();
+            $locationId = $request->input('locationId')
+                ?? ConfigService::getGHLLocationId($subAccountId)
+                ?? env('GHL_LOCATION_ID');
 
-                Log::info('Message forwarded to GHL:', [
-                    'contactId' => $contactId,
-                    'phone' => $phone,
-                    'subAccountId' => $subAccountId
+            if (!$locationId) {
+                Log::error('LocationId not configured for incoming message', [
+                    'subAccountId' => $subAccountId,
                 ]);
-
-                // Acknowledge receipt to Ultramsg
                 return response()->json([
-                    'success' => true,
-                    'message' => 'Message forwarded to GHL',
-                    'data' => $responseData
-                ]);
-            } else {
-                $errorData = $ghlResponse->json();
-                $statusCode = $ghlResponse->status();
-
-                Log::error('Error forwarding message to GHL:', [
-                    'status' => $statusCode,
-                    'error' => $errorData
-                ]);
-
-                // Provide more detailed error information
-                $errorDetails = [
-                    'error' => 'Failed to forward message to GHL',
-                    'message' => $errorData['message'] ?? 'Unknown error',
-                    'statusCode' => $statusCode,
-                    'ghlError' => $errorData
-                ];
-
-                // If 404, it's likely an invalid contactId
-                if ($statusCode === 404) {
-                    $errorDetails['hint'] = 'Contact ID may not exist in GHL. Verify the contactId is correct.';
-                }
-
-                // Still acknowledge to Ultramsg to prevent retries
-                return response()->json([
-                    'success' => false,
-                    ...$errorDetails
-                ]);
+                    'error'       => 'GHL locationId not configured for this sub-account',
+                    'subAccountId'=> $subAccountId,
+                ], 400);
             }
 
-        } catch (\Exception $error) {
-            Log::error('Error forwarding message to GHL:', [
-                'message' => $error->getMessage(),
-                'trace' => $error->getTraceAsString()
+            // Find or create contact
+            Log::info('Finding/creating contact', [
+                'phone' => $phone,
+                'locationId' => $locationId,
+            ]);
+            
+            $contactId = $this->ghl->findOrCreateContactByPhone($ghlAPIKey, $phone, $locationId);
+            
+            Log::info('Contact found/created', [
+                'contactId' => $contactId,
+                'phone' => $phone,
             ]);
 
-            // Still acknowledge to Ultramsg to prevent retries
+            // Keyword handling (Option 1)
+            $normalized = strtoupper(trim((string) $text));
+
+            if (in_array($normalized, ['STOP', 'UNSUBSCRIBE'], true)) {
+                Log::info('Processing STOP keyword', ['contactId' => $contactId]);
+                // Tag contact as unsubscribed from WhatsApp
+                $this->ghl->addTags($ghlAPIKey, $contactId, ['whatsapp_unsubscribed']);
+            } elseif (in_array($normalized, ['START', 'UNSTOP'], true)) {
+                Log::info('Processing START keyword', ['contactId' => $contactId]);
+                // Remove unsubscribed tag
+                $this->ghl->removeTags($ghlAPIKey, $contactId, ['whatsapp_unsubscribed'], $locationId);
+            }
+
+            // Always log the inbound message in conversations
+            Log::info('Creating GHL conversation message', [
+                'contactId' => $contactId,
+                'message' => $text,
+                'hasMedia' => !empty($media),
+            ]);
+            
+            $ghlMessageResponse = $this->ghl->createConversationMessage(
+                $ghlAPIKey,
+                $contactId,
+                $text,
+                $media,
+                'whatsapp',
+                $locationId
+            );
+            
+            Log::info('GHL conversation message created', [
+                'ghlResponse' => $ghlMessageResponse,
+            ]);
+
+            $ultramsgMessageId = $incoming->messageId;
+            $ghlMessageId      = $ghlMessageResponse['message']['id'] ?? $ghlMessageResponse['id'] ?? null;
+
+            if ($ultramsgMessageId && $ghlMessageId) {
+                ConfigService::storeMessageMapping($ultramsgMessageId, $ghlMessageId, $subAccountId);
+            }
+
+            Log::info('Incoming WhatsApp forwarded to GHL', [
+                'phone'        => $phone,
+                'contactId'    => $contactId,
+                'subAccountId' => $subAccountId,
+            ]);
+
+            return response()->json([
+                'success'   => true,
+                'message'   => 'Message forwarded to GHL',
+                'ghlResult' => $ghlMessageResponse,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error handling incoming WhatsApp message', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'payload' => $payload ?? null,
+            ]);
+
+            // Return 200 to prevent Ultramsg retries, but log the error clearly
             return response()->json([
                 'success' => false,
-                'error' => 'Failed to forward message to GHL',
-                'message' => $error->getMessage()
-            ]);
+                'error'   => 'Failed to forward message to GHL',
+                'message' => $e->getMessage(),
+                'logged' => true,
+            ], 200);
         }
     }
 
     /**
      * POST /status
-     * Receives status updates from Ultramsg and updates GHL
-     * Expected payload from Ultramsg status webhook
+     * Ultramsg delivery/read status webhook → mirror into GHL where possible.
      */
     public function status(Request $request): JsonResponse
     {
         try {
-            $statusData = $request->all();
+            $payload = $request->all();
+            $status  = $this->ultramsg->parseStatus($payload);
 
-            // Extract status information from Ultramsg webhook
-            $statusInfo = $this->extractStatusData($statusData);
-
-            if (!$statusInfo) {
+            if (!$status) {
                 return response()->json([
-                    'error' => 'Invalid status data format'
+                    'error'   => 'Invalid Ultramsg status payload',
+                    'payload' => $payload,
                 ], 400);
             }
 
-            $messageId = $statusInfo['messageId'];
-            $status = $statusInfo['status'];
-            $subAccountId = $statusInfo['subAccountId'];
+            $instanceId  = $status->instanceId;
+            $referenceId = $status->referenceId;
 
-            // Get GHL API key for the sub-account
-            $ghlAPIKey = ConfigService::getGHLAPIKey($subAccountId);
-            if (!$ghlAPIKey) {
-                return response()->json([
-                    'error' => 'GHL API key not found for sub-account',
-                    'message' => 'Please configure GHL_API_KEY in .env file or config.js',
-                    'subAccountId' => $subAccountId
-                ], 401);
+            $subAccountId = $referenceId ? preg_replace('/_\d+$/', '', $referenceId) : null;
+            if (!$subAccountId) {
+                $subAccountId = ConfigService::getSubAccountIdByInstance($instanceId);
             }
 
-            // Update message status in GHL (if supported by GHL API)
-            // Note: GHL API v1 may not support status updates via this endpoint
-            // Status updates might need to be handled via webhooks or API v2
-            // GHL API v2 endpoint: https://services.leadconnectorhq.com/conversations/messages/{messageId}
-            try {
-                $ghlResponse = Http::withHeaders([
-                    'Authorization' => "Bearer {$ghlAPIKey}",
-                    'Content-Type' => 'application/json'
-                ])->put("https://rest.gohighlevel.com/v1/conversations/messages/{$messageId}", [
-                    'status' => $status // e.g., 'delivered', 'read', 'sent'
-                ]);
-
-                if ($ghlResponse->successful()) {
-                    $responseData = $ghlResponse->json();
-
-                    Log::info('Status updated in GHL:', [
-                        'messageId' => $messageId,
-                        'status' => $status,
-                        'subAccountId' => $subAccountId
-                    ]);
-
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Status updated in GHL',
-                        'data' => $responseData
-                    ]);
-                } else {
-                    throw new \Exception('GHL API returned error: ' . $ghlResponse->status());
-                }
-
-            } catch (\Exception $ghlError) {
-                // If GHL doesn't support status updates, log but don't fail
-                Log::warning('GHL status update not supported or failed:', [
-                    'message' => $ghlError->getMessage()
+            if (!$subAccountId) {
+                Log::warning('Status received but sub-account could not be resolved', [
+                    'payload' => $payload,
                 ]);
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Status received (GHL update may not be supported)',
-                    'status' => $status
+                    'message' => 'Status received but sub-account unknown (logged only).',
                 ]);
             }
 
-        } catch (\Exception $error) {
-            Log::error('Error processing status update:', [
-                'message' => $error->getMessage(),
-                'trace' => $error->getTraceAsString()
+            $ghlAPIKey = ConfigService::getGHLAPIKey($subAccountId);
+            if (!$ghlAPIKey) {
+                return response()->json([
+                    'error'       => 'GHL API key not configured for this sub-account',
+                    'subAccountId'=> $subAccountId,
+                ], 401);
+            }
+
+            $ultramsgMessageId = $status->messageId;
+            $ghlMessageId      = ConfigService::getGHLMessageId($ultramsgMessageId);
+
+            if (!$ghlMessageId) {
+                Log::warning('GHL message ID not found for Ultramsg message', [
+                    'ultramsgMessageId' => $ultramsgMessageId,
+                    'subAccountId'      => $subAccountId,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Status received but GHL message ID not found (logged only).',
+                ]);
+            }
+
+            $updated = $this->ghl->updateMessageStatus(
+                $ghlAPIKey,
+                $ghlMessageId,
+                $status->status
+            );
+
+            if ($updated) {
+                Log::info('Message status updated in GHL', [
+                    'ghlMessageId' => $ghlMessageId,
+                    'status'       => $status->status,
+                    'subAccountId' => $subAccountId,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Status updated in GHL',
+                ]);
+            }
+
+            Log::warning('GHL did not accept status update, but status stored in logs only', [
+                'status' => $status,
             ]);
 
             return response()->json([
-                'error' => 'Failed to process status update',
-                'message' => $error->getMessage()
+                'success' => true,
+                'message' => 'Status received (GHL update not supported or failed)',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error processing WhatsApp status', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error'   => 'Failed to process status update',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
-     * Helper function to extract message data from Ultramsg webhook
-     * Adjust this based on actual Ultramsg webhook format
+     * POST /onboard
      */
-    private function extractMessageData(array $ultramsgData): ?array
+    public function onboard(Request $request): JsonResponse
     {
         try {
-            // Example Ultramsg webhook structure (adjust based on actual format)
-            // Common formats:
-            // - ultramsgData['data']['body']
-            // - ultramsgData['message']
-            // - ultramsgData['text']
+            $subAccountId = $request->input('subAccountId');
+            $instanceId   = $request->input('instanceId');
+            $apiToken     = $request->input('apiToken');
 
-            $message = $ultramsgData['data']['body'] ??
-                      ($ultramsgData['message'] ??
-                      ($ultramsgData['text'] ??
-                      ($ultramsgData['body'] ?? null)));
-
-            $phone = $ultramsgData['data']['from'] ??
-                    ($ultramsgData['from'] ??
-                    ($ultramsgData['phone'] ?? null));
-
-            // Extract sub-account ID from webhook (may be in headers or data)
-            $subAccountId = $ultramsgData['subAccountId'] ??
-                          ($ultramsgData['data']['subAccountId'] ??
-                          ($ultramsgData['instanceId'] ?? null)); // fallback to instanceId
-
-            // Contact ID mapping - you may need to look this up from phone number
-            // For now, using phone as contactId (adjust based on your GHL setup)
-            $contactId = $ultramsgData['contactId'] ?? $phone;
-
-            if (!$message || !$phone) {
-                return null;
+            if (!$subAccountId || !$instanceId || !$apiToken) {
+                return response()->json([
+                    'error'    => 'Missing required fields',
+                    'required' => ['subAccountId', 'instanceId', 'apiToken'],
+                ], 400);
             }
 
-            return [
-                'message' => $message,
-                'phone' => $phone,
-                'contactId' => $contactId,
-                'subAccountId' => $subAccountId
-            ];
-        } catch (\Exception $error) {
-            Log::error('Error extracting message data:', [
-                'message' => $error->getMessage()
+            ConfigService::setUltramsgCredentials($subAccountId, $instanceId, $apiToken);
+
+            Log::info('Ultramsg credentials stored for sub-account', [
+                'subAccountId' => $subAccountId,
+                'instanceId'   => $instanceId,
             ]);
-            return null;
+
+            return response()->json([
+                'success'      => true,
+                'message'      => 'Ultramsg credentials stored for sub-account',
+                'subAccountId' => $subAccountId,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error onboarding sub-account', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error'   => 'Failed to onboard sub-account',
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 
     /**
-     * Helper function to extract status data from Ultramsg webhook
-     * Adjust this based on actual Ultramsg status webhook format
+     * GET /onboard/qr
      */
-    private function extractStatusData(array $statusData): ?array
+    public function getQRCode(Request $request): JsonResponse
     {
         try {
-            // Example Ultramsg status webhook structure (adjust based on actual format)
-            $messageId = $statusData['data']['id'] ??
-                        ($statusData['messageId'] ??
-                        ($statusData['id'] ?? null));
+            $instanceId = $request->input('instanceId');
+            $apiToken   = $request->input('apiToken');
 
-            $status = $statusData['data']['status'] ??
-                     ($statusData['status'] ??
-                     ($statusData['event'] ?? null)); // e.g., 'delivered', 'read', 'sent'
-
-            $subAccountId = $statusData['subAccountId'] ??
-                           ($statusData['data']['subAccountId'] ??
-                           ($statusData['instanceId'] ?? null));
-
-            if (!$messageId || !$status) {
-                return null;
+            if (!$instanceId || !$apiToken) {
+                return response()->json([
+                    'error'    => 'Missing required fields',
+                    'required' => ['instanceId', 'apiToken'],
+                ], 400);
             }
 
-            return [
-                'messageId' => $messageId,
-                'status' => $status,
-                'subAccountId' => $subAccountId
-            ];
-        } catch (\Exception $error) {
-            Log::error('Error extracting status data:', [
-                'message' => $error->getMessage()
+            $qrData = $this->ultramsg->getQRCode($instanceId, $apiToken);
+
+            return response()->json([
+                'success' => true,
+                'data'    => $qrData,
             ]);
-            return null;
+        } catch (\Throwable $e) {
+            Log::error('Error getting QR code', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error'   => 'Failed to get QR code',
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 }
