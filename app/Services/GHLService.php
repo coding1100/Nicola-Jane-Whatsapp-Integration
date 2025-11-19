@@ -124,44 +124,57 @@ class GHLService
         // Use /inbound endpoint for incoming messages (per GHL official docs)
         $url = 'https://services.leadconnectorhq.com/conversations/messages/inbound';
 
-        // Build payload per GHL API documentation for /conversations/messages/inbound
+        // Build payload per GHL API documentation schema - following exact property order
         $payload = [];
 
-        // Either conversationId OR contactId is required (per GHL docs)
-        // Include both if available for better association
+        // Validate required fields
+        if (empty($conversationId) && empty($contactId)) {
+            throw new \RuntimeException('Either conversationId or contactId is required for GHL inbound message');
+        }
+
+        // Build payload in exact schema order
+        // 1. type
+        $payload['type'] = 'InboundMessage';
+        
+        // 2. locationId
+        if ($locationId) {
+            $payload['locationId'] = $locationId;
+        }
+        
+        // 3. attachments
+        $payload['attachments'] = !empty($attachmentUrls) ? $attachmentUrls : [];
+        
+        // 4. body
+        if ($message) {
+            $payload['body'] = $message;
+        }
+        
+        // 5. contactId
+        if ($contactId) {
+            $payload['contactId'] = $contactId;
+        }
+        
+        // 6. contentType
+        $payload['contentType'] = 'text/plain';
+        
+        // 7. conversationId
         if ($conversationId) {
             $payload['conversationId'] = $conversationId;
         }
         
-        if ($contactId) {
-            $payload['contactId'] = $contactId;
-        }
-
-        // Validate required fields
-        if (empty($payload['conversationId']) && empty($payload['contactId'])) {
-            throw new \RuntimeException('Either conversationId or contactId is required for GHL inbound message');
-        }
-
-        // Message body field - GHL inbound endpoint uses "body"
-        if ($message) {
-            $payload['body'] = $message;
-        }
-
-        if ($locationId) {
-            $payload['locationId'] = $locationId;
-        }
-
-        // Required fields per GHL API documentation example
-        $payload['type'] = 'InboundMessage';
-        $payload['messageType'] = $type;
-        $payload['contentType'] = 'text/plain';
+        // 8. dateAdded
         $payload['dateAdded'] = now()->utc()->format('Y-m-d\TH:i:s.v\Z');
+        
+        // 9. direction
         $payload['direction'] = 'inbound';
+        
+        // 10. messageType
+        $payload['messageType'] = $type;
+        
+        // 11. status
         $payload['status'] = 'delivered';
-
-        if (!empty($attachmentUrls)) {
-            $payload['attachments'] = $attachmentUrls;
-        }
+        
+        // Optional fields (12-17) not included unless needed
 
         // Log payload before sending
         Log::info('Sending inbound message to GHL', [
