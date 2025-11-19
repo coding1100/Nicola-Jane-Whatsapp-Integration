@@ -144,9 +144,14 @@ class WhatsAppController extends Controller
                             'WhatsApp',
                             $locationId
                         );
-                        $ghlMessageId = $ghlMessage['message']['id'] ?? $ghlMessage['id'] ?? null;
+                        $ghlMessageId = $ghlMessage['messageId'] ?? $ghlMessage['message']['id'] ?? $ghlMessage['id'] ?? null;
                         if ($ghlMessageId && $ultramsgMessageId) {
-                            ConfigService::storeMessageMapping($ultramsgMessageId, $ghlMessageId, $subAccountId);
+                            // Message mapping stored in logs only (no database due to permission issues)
+                            Log::info('Message mapping (not stored in DB)', [
+                                'ultramsgMessageId' => $ultramsgMessageId,
+                                'ghlMessageId' => $ghlMessageId,
+                                'subAccountId' => $subAccountId,
+                            ]);
                         }
                     }
                 } catch (\Exception $e) {
@@ -336,7 +341,12 @@ class WhatsAppController extends Controller
             $ghlMessageId      = $ghlMessageResponse['messageId'] ?? $ghlMessageResponse['message']['id'] ?? $ghlMessageResponse['id'] ?? null;
 
             if ($ultramsgMessageId && $ghlMessageId) {
-                ConfigService::storeMessageMapping($ultramsgMessageId, $ghlMessageId, $subAccountId);
+                // Message mapping stored in logs only (no database due to permission issues)
+                Log::info('Message mapping (not stored in DB)', [
+                    'ultramsgMessageId' => $ultramsgMessageId,
+                    'ghlMessageId' => $ghlMessageId,
+                    'subAccountId' => $subAccountId,
+                ]);
             }
 
             Log::info('Incoming WhatsApp forwarded to GHL', [
@@ -414,12 +424,14 @@ class WhatsAppController extends Controller
             }
 
             $ultramsgMessageId = $status->messageId;
-            $ghlMessageId      = ConfigService::getGHLMessageId($ultramsgMessageId);
+            // Message mappings not stored in DB (permission issues) - status syncing skipped
+            $ghlMessageId = null;
 
             if (!$ghlMessageId) {
-                Log::warning('GHL message ID not found for Ultramsg message', [
+                Log::info('Status update received (message mapping not available - DB storage disabled)', [
                     'ultramsgMessageId' => $ultramsgMessageId,
-                    'subAccountId'      => $subAccountId,
+                    'status' => $status->status,
+                    'subAccountId' => $subAccountId,
                 ]);
 
                 return response()->json([
