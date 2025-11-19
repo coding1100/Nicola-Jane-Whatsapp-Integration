@@ -162,30 +162,37 @@ class ConfigService
      */
     public static function getSubAccountIdByInstance(string $instanceId): ?string
     {
-        try {
-            $mapping = DB::table('whatsapp_instance_mappings')
-                ->where('instance_id', $instanceId)
-                ->first();
-
-            if ($mapping) {
-                return $mapping->sub_account_id;
-            }
-
-            // Fallback: check credentials table
-            $credential = DB::table('whatsapp_credentials')
-                ->where('instance_id', $instanceId)
-                ->first();
-
-            if ($credential) {
-                return $credential->sub_account_id;
-            }
-        } catch (\Exception $e) {
-            Log::error('Error fetching sub-account ID by instance', [
-                'error' => $e->getMessage(),
-                'instanceId' => $instanceId,
-            ]);
+        // Only check config file - no database lookup
+        $config = config('whatsapp.instance_mappings', []);
+        
+        // Direct lookup
+        if (isset($config[$instanceId])) {
+            return $config[$instanceId];
         }
-
+        
+        // Try with "instance" prefix (in case config has "instance149866" but webhook sends "149866")
+        $instanceIdWithPrefix = 'instance' . $instanceId;
+        if (isset($config[$instanceIdWithPrefix])) {
+            return $config[$instanceIdWithPrefix];
+        }
+        
+        // Try without "instance" prefix (in case webhook sends "instance149866" but config has "149866")
+        if (str_starts_with($instanceId, 'instance')) {
+            $instanceIdWithoutPrefix = str_replace('instance', '', $instanceId);
+            if (isset($config[$instanceIdWithoutPrefix])) {
+                return $config[$instanceIdWithoutPrefix];
+            }
+        }
+        
+        // Check if this instanceId matches the default instance_id in config
+        $ultramsgConfig = config('whatsapp.ultramsg', []);
+        $defaultInstanceId = $ultramsgConfig['instance_id'] ?? null;
+        
+        if ($defaultInstanceId && ($defaultInstanceId === $instanceId || $defaultInstanceId === 'instance' . $instanceId || 'instance' . $defaultInstanceId === $instanceId)) {
+            // Return 'default' as subAccountId if instance matches default
+            return 'default';
+        }
+        
         return null;
     }
 

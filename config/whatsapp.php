@@ -65,5 +65,26 @@ return [
             // ],
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Instance ID to Sub-Account ID Mapping
+    |--------------------------------------------------------------------------
+    |
+    | Map Ultramsg instance IDs to sub-account IDs.
+    | This is used when receiving incoming webhooks to determine which
+    | sub-account the message belongs to.
+    |
+    */
+
+    'instance_mappings' => [
+        // Map instance ID to sub-account ID
+        // Format: 'instance_id' => 'sub_account_id'
+        '149866' => 'default',
+        'instance149866' => 'default',
+        // Add more mappings as needed:
+        // 'instance123' => 'sub_account_001',
+        // 'instance456' => 'sub_account_002',
+    ],
 ];
 
