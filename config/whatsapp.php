@@ -46,10 +46,10 @@ return [
 
     'ultramsg' => [
         // Default Ultramsg Instance ID (fallback only)
-        'instance_id' => '',
+        'instance_id' => 'instance149866',
 
         // Default Ultramsg API Token (fallback only)
-        'api_token' => '',
+        'api_token' => 'ro37j993kbiptecy',
     ],
 ];
 
