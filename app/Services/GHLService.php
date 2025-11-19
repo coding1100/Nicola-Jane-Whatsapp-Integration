@@ -273,12 +273,31 @@ class GHLService
         ])->post($createUrl, $createPayload);
 
         if (!$createResponse->successful()) {
+            $errorBody = $createResponse->body();
+            $errorJson = $createResponse->json();
+            
+            // Handle duplicate conversation error - GHL returns conversationId in error response
+            if ($createResponse->status() === 400 && isset($errorJson['message']) && 
+                str_contains($errorJson['message'], 'Conversation already exists') && 
+                isset($errorJson['conversationId'])) {
+                
+                $conversationId = $errorJson['conversationId'];
+                
+                Log::info('Conversation already exists, using existing conversationId', [
+                    'conversationId' => $conversationId,
+                    'contactId' => $contactId,
+                ]);
+                
+                return $conversationId;
+            }
+            
             Log::error('Failed to create conversation', [
                 'status' => $createResponse->status(),
-                'body' => $createResponse->body(),
+                'body' => $errorBody,
+                'json' => $errorJson,
                 'payload' => $createPayload,
             ]);
-            throw new \RuntimeException('Failed to create conversation (HTTP ' . $createResponse->status() . '): ' . $createResponse->body());
+            throw new \RuntimeException('Failed to create conversation (HTTP ' . $createResponse->status() . '): ' . $errorBody);
         }
 
         $conversationData = $createResponse->json();
