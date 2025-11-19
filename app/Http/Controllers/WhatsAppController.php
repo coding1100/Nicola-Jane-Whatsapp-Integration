@@ -141,7 +141,7 @@ class WhatsAppController extends Controller
                             $contactId,
                             $message,
                             $mediaUrl ? [['url' => $mediaUrl, 'type' => $mediaType]] : null,
-                            'whatsapp',
+                            'WhatsApp',
                             $locationId
                         );
                         $ghlMessageId = $ghlMessage['message']['id'] ?? $ghlMessage['id'] ?? null;
