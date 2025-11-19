@@ -151,9 +151,8 @@ class GHLService
             $payload['locationId'] = $locationId;
         }
 
-        // Channel type - GHL inbound endpoint requires uppercase enum value
-        // Valid values: "WHATSAPP", "SMS", "EMAIL", "VOICE", etc.
-        $payload['type'] = strtoupper($type); // e.g. "WHATSAPP"
+        // Type is inferred from the conversation, so we don't include it in the payload
+        // The conversationId already contains the type information
 
         if (!empty($attachmentUrls)) {
             $payload['attachments'] = $attachmentUrls;
