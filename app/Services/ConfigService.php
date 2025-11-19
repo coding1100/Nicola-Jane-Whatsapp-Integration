@@ -334,4 +334,60 @@ class ConfigService
             return null;
         }
     }
+
+    /**
+     * Get sub-account ID by GHL location ID
+     * @param string $locationId - GHL location ID
+     * @return string|null - Sub-account ID or null if not found
+     */
+    public static function getSubAccountIdByLocationId(string $locationId): ?string
+    {
+        // Check config file for location mappings
+        $config = config('whatsapp.location_mappings', []);
+        
+        Log::info('getSubAccountIdByLocationId called', [
+            'locationId' => $locationId,
+            'locationId_type' => gettype($locationId),
+            'config_keys' => array_keys($config),
+            'config_full' => $config,
+        ]);
+        
+        // Normalize locationId to string
+        $locationId = (string) $locationId;
+        
+        // Direct lookup
+        if (isset($config[$locationId])) {
+            Log::info('Found subAccountId via locationId mapping', [
+                'locationId' => $locationId,
+                'subAccountId' => $config[$locationId],
+            ]);
+            return $config[$locationId];
+        }
+        
+        // Check if this locationId matches the default location_id in config
+        $ghlConfig = config('whatsapp.ghl', []);
+        $defaultLocationId = $ghlConfig['location_id'] ?? null;
+        
+        Log::info('Checking default location_id match', [
+            'locationId' => $locationId,
+            'defaultLocationId' => $defaultLocationId,
+        ]);
+        
+        if ($defaultLocationId && (string) $defaultLocationId === $locationId) {
+            Log::info('Found subAccountId via default location_id match', [
+                'locationId' => $locationId,
+                'defaultLocationId' => $defaultLocationId,
+                'subAccountId' => 'default',
+            ]);
+            return 'default';
+        }
+        
+        Log::warning('No subAccountId found for locationId', [
+            'locationId' => $locationId,
+            'config_keys' => array_keys($config),
+            'defaultLocationId' => $defaultLocationId,
+        ]);
+        
+        return null;
+    }
 }

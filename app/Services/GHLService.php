@@ -539,6 +539,192 @@ class GHLService
     }
 
     /**
+     * Parse GHL webhook payload for SMS workflow triggers
+     * Handles various GHL webhook payload formats
+     * 
+     * @param array $payload - Raw webhook payload from GHL
+     * @return object|null - Parsed data: {phone, message, locationId, media, contactId} or null if invalid
+     */
+    public function parseWebhookPayload(array $payload): ?object
+    {
+        try {
+            Log::info('GHLService::parseWebhookPayload called', [
+                'payload_keys' => array_keys($payload),
+                'payload_structure' => $this->getPayloadStructure($payload),
+            ]);
+
+            // Extract locationId - can be at root level or nested
+            $locationId = $payload['locationId'] 
+                ?? $payload['location']['id'] 
+                ?? $payload['data']['locationId'] 
+                ?? $payload['location_id'] 
+                ?? null;
+
+            // Extract phone number - multiple possible locations
+            $phone = $payload['phone'] 
+                ?? $payload['contact']['phone'] 
+                ?? $payload['contact']['phoneNumber'] 
+                ?? $payload['data']['phone'] 
+                ?? $payload['data']['contact']['phone'] 
+                ?? $payload['recipient']['phone'] 
+                ?? null;
+
+            // Extract message/text - multiple possible locations
+            $message = $payload['message'] 
+                ?? $payload['text'] 
+                ?? $payload['body'] 
+                ?? $payload['content'] 
+                ?? $payload['data']['message'] 
+                ?? $payload['data']['text'] 
+                ?? $payload['data']['body'] 
+                ?? $payload['data']['content'] 
+                ?? $payload['sms']['message'] 
+                ?? $payload['sms']['text'] 
+                ?? $payload['sms']['body'] 
+                ?? null;
+
+            // Extract contactId (optional)
+            $contactId = $payload['contactId'] 
+                ?? $payload['contact']['id'] 
+                ?? $payload['data']['contactId'] 
+                ?? $payload['data']['contact']['id'] 
+                ?? null;
+
+            // Extract media attachments (if any)
+            $media = $this->extractMediaFromPayload($payload);
+
+            // Normalize phone number
+            if ($phone) {
+                $phone = $this->normalizePhone($phone);
+            }
+
+            // Validate required fields
+            if (!$phone || (!$message && empty($media))) {
+                Log::warning('GHL webhook payload missing required fields', [
+                    'has_phone' => !empty($phone),
+                    'has_message' => !empty($message),
+                    'has_media' => !empty($media),
+                    'phone' => $phone,
+                    'message' => $message,
+                    'locationId' => $locationId,
+                ]);
+                return null;
+            }
+
+            $parsed = (object) [
+                'phone' => $phone,
+                'message' => $message,
+                'locationId' => $locationId,
+                'media' => $media,
+                'contactId' => $contactId,
+            ];
+
+            Log::info('GHL webhook payload parsed successfully', [
+                'phone' => $parsed->phone,
+                'message_length' => is_string($parsed->message) ? strlen($parsed->message) : 0,
+                'has_message' => !empty($parsed->message),
+                'locationId' => $parsed->locationId,
+                'media_count' => count($parsed->media),
+                'contactId' => $parsed->contactId,
+            ]);
+
+            return $parsed;
+        } catch (\Exception $e) {
+            Log::error('Error parsing GHL webhook payload', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'payload' => $payload,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Extract media attachments from GHL webhook payload
+     * 
+     * @param array $payload - Webhook payload
+     * @return array - Array of media items: [['url' => ..., 'type' => ...], ...]
+     */
+    private function extractMediaFromPayload(array $payload): array
+    {
+        $media = [];
+
+        // Check various possible locations for media
+        $mediaSources = [
+            $payload['media'] ?? null,
+            $payload['attachments'] ?? null,
+            $payload['data']['media'] ?? null,
+            $payload['data']['attachments'] ?? null,
+            $payload['files'] ?? null,
+            $payload['data']['files'] ?? null,
+        ];
+
+        foreach ($mediaSources as $mediaSource) {
+            if (!$mediaSource) {
+                continue;
+            }
+
+            if (is_string($mediaSource)) {
+                // Single media URL as string
+                $media[] = ['url' => $mediaSource, 'type' => 'image'];
+            } elseif (is_array($mediaSource)) {
+                if (array_is_list($mediaSource)) {
+                    // Array of media items
+                    foreach ($mediaSource as $item) {
+                        if (is_string($item)) {
+                            $media[] = ['url' => $item, 'type' => 'image'];
+                        } elseif (is_array($item)) {
+                            $media[] = [
+                                'url' => $item['url'] ?? $item['media'] ?? $item['file'] ?? null,
+                                'type' => $item['type'] ?? $item['mediaType'] ?? 'image',
+                            ];
+                        }
+                    }
+                } else {
+                    // Single media object
+                    $media[] = [
+                        'url' => $mediaSource['url'] ?? $mediaSource['media'] ?? $mediaSource['file'] ?? null,
+                        'type' => $mediaSource['type'] ?? $mediaSource['mediaType'] ?? 'image',
+                    ];
+                }
+            }
+        }
+
+        // Filter out empty URLs
+        $media = array_values(array_filter($media, fn($m) => !empty($m['url'])));
+
+        return $media;
+    }
+
+    /**
+     * Get payload structure for logging/debugging
+     * 
+     * @param array $payload - Webhook payload
+     * @return array - Structure information
+     */
+    private function getPayloadStructure(array $payload): array
+    {
+        $structure = [];
+        
+        foreach ($payload as $key => $value) {
+            if (is_array($value)) {
+                $structure[$key] = [
+                    'type' => 'array',
+                    'keys' => array_keys($value),
+                    'count' => count($value),
+                ];
+            } else {
+                $structure[$key] = [
+                    'type' => gettype($value),
+                    'value_preview' => is_string($value) ? substr($value, 0, 50) : $value,
+                ];
+            }
+        }
+        
+        return $structure;
+    }
+
+    /**
      * Normalize phone number to E.164 format
      */
     private function normalizePhone(string $phone): string

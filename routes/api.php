@@ -25,3 +25,6 @@ Route::post('/incoming', [WhatsAppController::class, 'incoming']);
 Route::post('/status', [WhatsAppController::class, 'status']);
 Route::post('/onboard', [WhatsAppController::class, 'onboard']);
 Route::get('/onboard/qr', [WhatsAppController::class, 'getQRCode']);
+
+// GHL Webhook endpoint (public, no authentication)
+Route::post('/ghl/webhook', [WhatsAppController::class, 'ghlWebhook']);
