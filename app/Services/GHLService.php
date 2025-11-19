@@ -151,9 +151,13 @@ class GHLService
             $payload['locationId'] = $locationId;
         }
 
-        // Try using only messageType field (type field might not be needed for this endpoint)
-        // messageType specifies the communication channel
-        $payload['messageType'] = strtoupper($type); // e.g. "WHATSAPP"
+        // Required fields per GHL API documentation example
+        $payload['type'] = 'InboundMessage';
+        $payload['messageType'] = strtoupper($type); // e.g. "WHATSAPP" for WhatsApp, "SMS" for SMS
+        $payload['contentType'] = 'text/plain';
+        $payload['dateAdded'] = now()->utc()->format('Y-m-d\TH:i:s.v\Z');
+        $payload['direction'] = 'inbound';
+        $payload['status'] = 'delivered';
 
         if (!empty($attachmentUrls)) {
             $payload['attachments'] = $attachmentUrls;
