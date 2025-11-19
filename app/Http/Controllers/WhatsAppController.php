@@ -24,17 +24,38 @@ class WhatsAppController extends Controller
         return response()->json([
             'status'    => 'ok',
             'message'   => 'WhatsApp Bridge API is running',
-            'endpoints' => ['/send', '/incoming', '/status', '/onboard', '/onboard/qr'],
+            'endpoints' => [
+                '/send' => 'Send WhatsApp message (accepts phone, message, locationId or subAccountId)',
+                '/incoming' => 'Ultramsg incoming webhook',
+                '/status' => 'Ultramsg status webhook',
+                '/onboard' => 'Onboard sub-account',
+                '/onboard/qr' => 'Get QR code for WhatsApp connection',
+                '/ghl/webhook' => 'GHL webhook endpoint (optional, can use /send directly)',
+            ],
         ]);
     }
 
     /**
      * POST /send
      *
-     * This is what GHL workflows call instead of SMS when you map SMS steps → HTTP webhook (Option A).
+     * This is what GHL workflows call instead of SMS when you map SMS steps → HTTP webhook.
+     * 
+     * Accepts either:
+     * - subAccountId (direct) - for backward compatibility
+     * - locationId (resolves to subAccountId via mapping) - for GHL webhooks
      */
     public function send(Request $request): JsonResponse
     {
+        // Log incoming request for debugging (especially for GHL webhooks)
+        $payload = $request->all();
+        Log::info('Send endpoint called', [
+            'payload_keys' => array_keys($payload),
+            'has_phone' => isset($payload['phone']),
+            'has_message' => isset($payload['message']),
+            'has_subAccountId' => isset($payload['subAccountId']),
+            'has_locationId' => isset($payload['locationId']),
+        ]);
+
         try {
             $message     = $request->input('message');
             $phone       = $request->input('phone');
@@ -43,17 +64,48 @@ class WhatsAppController extends Controller
             $mediaUrl    = $request->input('mediaUrl');
             $mediaType   = $request->input('mediaType', 'image'); // image, document, audio, video
 
-            if (!$phone || !$subAccountId) {
+            // Validate phone number
+            if (!$phone) {
                 return response()->json([
-                    'error'    => 'Missing required fields',
-                    'required' => ['phone', 'subAccountId'],
+                    'error'    => 'Missing required field: phone',
+                    'required' => ['phone'],
                 ], 400);
             }
 
+            // Validate message or media
             if (!$message && !$mediaUrl) {
                 return response()->json([
                     'error'    => 'At least one of message or mediaUrl is required',
-                    'required' => ['message or mediaUrl', 'phone', 'subAccountId'],
+                    'required' => ['message or mediaUrl', 'phone'],
+                ], 400);
+            }
+
+            // Resolve subAccountId from locationId if subAccountId not provided
+            if (!$subAccountId && $locationId) {
+                Log::info('Resolving subAccountId from locationId', [
+                    'locationId' => $locationId,
+                ]);
+                
+                $subAccountId = ConfigService::getSubAccountIdByLocationId($locationId);
+                
+                if (!$subAccountId) {
+                    Log::warning('No sub-account found for locationId, using default', [
+                        'locationId' => $locationId,
+                    ]);
+                    $subAccountId = 'default'; // Fallback to default
+                }
+                
+                Log::info('Sub-account resolved from locationId', [
+                    'locationId' => $locationId,
+                    'subAccountId' => $subAccountId,
+                ]);
+            }
+
+            // Validate subAccountId is now available
+            if (!$subAccountId) {
+                return response()->json([
+                    'error'    => 'Missing required field: either subAccountId or locationId must be provided',
+                    'required' => ['phone', 'subAccountId or locationId'],
                 ], 400);
             }
 
@@ -600,6 +652,108 @@ class WhatsAppController extends Controller
                 'error'   => 'Failed to get QR code',
                 'message' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * POST /ghl/webhook
+     * 
+     * GHL webhook endpoint - now just a passthrough to /send with payload parsing.
+     * This endpoint handles GHL webhook payload variations and forwards to /send.
+     * 
+     * Note: You can also call /send directly if your GHL webhook sends the correct format.
+     */
+    public function ghlWebhook(Request $request): JsonResponse
+    {
+        // Log raw webhook payload for analysis
+        $payload = $request->all();
+        $rawBody = $request->getContent();
+        
+        Log::info('GHL Webhook Received - Raw Payload', [
+            'timestamp' => now()->toIso8601String(),
+            'method' => $request->method(),
+            'url' => $request->fullUrl(),
+            'headers' => $request->headers->all(),
+            'payload' => $payload,
+            'raw_body' => $rawBody,
+            'payload_keys' => array_keys($payload),
+            'payload_json' => json_encode($payload, JSON_PRETTY_PRINT),
+        ]);
+
+        try {
+            // Parse GHL webhook payload to handle various formats
+            $parsed = $this->ghl->parseWebhookPayload($payload);
+
+            if (!$parsed) {
+                Log::error('Failed to parse GHL webhook payload', [
+                    'payload' => $payload,
+                    'payload_keys' => array_keys($payload),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error'   => 'Invalid GHL webhook payload - missing required fields',
+                    'received_keys' => array_keys($payload),
+                    'hint' => 'Expected fields: phone, message (or media), locationId',
+                ], 400);
+            }
+
+            Log::info('GHL webhook parsed successfully, forwarding to /send', [
+                'phone' => $parsed->phone,
+                'has_message' => !empty($parsed->message),
+                'locationId' => $parsed->locationId,
+                'media_count' => count($parsed->media),
+            ]);
+
+            // Prepare media data if present
+            $mediaUrl = null;
+            $mediaType = 'image';
+            
+            if (!empty($parsed->media)) {
+                $firstMedia = $parsed->media[0];
+                $mediaUrl = $firstMedia['url'] ?? null;
+                $mediaType = $firstMedia['type'] ?? 'image';
+            }
+
+            // Forward to /send endpoint
+            $sendRequest = new Request([
+                'phone' => $parsed->phone,
+                'message' => $parsed->message,
+                'locationId' => $parsed->locationId, // /send will resolve subAccountId from this
+                'mediaUrl' => $mediaUrl,
+                'mediaType' => $mediaType,
+            ]);
+
+            // Call the send method
+            $sendResponse = $this->send($sendRequest);
+            $sendData = json_decode($sendResponse->getContent(), true);
+
+            Log::info('GHL webhook processed - forwarded to /send', [
+                'phone' => $parsed->phone,
+                'locationId' => $parsed->locationId,
+                'whatsapp_success' => $sendData['success'] ?? false,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'GHL webhook processed and forwarded to /send',
+                'data' => $sendData,
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('Error processing GHL webhook', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'payload' => $payload ?? null,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error'   => 'Failed to process GHL webhook',
+                'message' => $e->getMessage(),
+            ], 200); // Return 200 to prevent GHL retries
         }
     }
 }

@@ -184,13 +184,19 @@ class UltramsgService
             ]);
 
             $instanceId  = $payload['instanceId'] ?? null;
-            $referenceId = $payload['referenceId'] ?? null;
+            // Check multiple locations for referenceId (Ultramsg may put it in different places)
+            $referenceId = $payload['referenceId'] 
+                ?? $payload['data']['referenceId'] 
+                ?? $payload['data']['reference_id']
+                ?? $payload['reference_id']
+                ?? null;
             $data        = $payload['data'] ?? $payload; // fallback
 
             Log::info('Extracting fields from payload', [
                 'instanceId' => $instanceId,
                 'referenceId' => $referenceId,
                 'data_keys' => is_array($data) ? array_keys($data) : 'not_array',
+                'payload_keys' => array_keys($payload),
             ]);
 
             $phone  = $data['from'] ?? $data['sender'] ?? $payload['from'] ?? $payload['phone'] ?? null;
